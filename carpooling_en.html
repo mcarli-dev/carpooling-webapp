@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Carpooling — Bugatti Rimac</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; height: 100vh; display: flex; flex-direction: column; }
+  #map { flex: 1; }
+
+  #add-btn {
+    position: fixed;
+    bottom: 32px;
+    right: 32px;
+    z-index: 1000;
+    background: #1a73e8;
+    color: #fff;
+    border: none;
+    border-radius: 50px;
+    padding: 14px 24px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+    transition: background 0.2s, transform 0.1s;
+  }
+  #add-btn:hover { background: #1558b0; transform: scale(1.03); }
+
+  .overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+  }
+  .overlay.open { display: flex; }
+
+  .modal {
+    background: #fff;
+    border-radius: 12px;
+    padding: 32px;
+    width: 360px;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.2);
+  }
+  .modal h2 { font-size: 20px; margin-bottom: 24px; color: #111; }
+
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-size: 13px; font-weight: 500; color: #555; margin-bottom: 6px; }
+  .field input[type="text"] {
+    width: 100%; border: 1px solid #ddd; border-radius: 8px;
+    padding: 10px 12px; font-size: 15px; outline: none; transition: border-color 0.2s;
+  }
+  .field input:focus { border-color: #1a73e8; }
+
+  .car-toggle { display: flex; gap: 10px; }
+  .car-toggle button {
+    flex: 1; padding: 12px; border-radius: 8px; border: 2px solid #ddd;
+    background: #fff; font-size: 22px; cursor: pointer; transition: all 0.15s;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+  }
+  .car-toggle button span { font-size: 12px; font-weight: 500; color: #888; }
+  .car-toggle button.selected { border-color: #1a73e8; background: #e8f0fe; }
+  .car-toggle button.selected span { color: #1a73e8; }
+
+  .modal-actions { display: flex; gap: 10px; margin-top: 24px; }
+  .btn-cancel {
+    flex: 1; padding: 11px; border-radius: 8px; border: 1px solid #ddd;
+    background: #fff; font-size: 15px; cursor: pointer; color: #555;
+  }
+  .btn-confirm {
+    flex: 2; padding: 11px; border-radius: 8px; border: none;
+    background: #1a73e8; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  .btn-confirm:hover { background: #1558b0; }
+
+  .popup-name { font-weight: 600; font-size: 14px; }
+  .popup-addr { font-size: 12px; color: #666; margin-top: 2px; }
+  .popup-tag { font-size: 11px; margin-top: 6px; font-weight: 500; }
+  .popup-tag.car { color: #1a73e8; }
+  .popup-tag.walk { color: #34a853; }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+<button id="add-btn" onclick="openModal()">＋ Add yourself to the map</button>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h2>Where do you live?</h2>
+    <div class="field">
+      <label>First name</label>
+      <input type="text" id="f-name" placeholder="Mario">
+    </div>
+    <div class="field">
+      <label>Last name</label>
+      <input type="text" id="f-surname" placeholder="Rossi">
+    </div>
+    <div class="field">
+      <label>Home address</label>
+      <input type="text" id="f-address" placeholder="Ilica 42, Zagreb">
+    </div>
+    <div class="field">
+      <label>Do you have a car?</label>
+      <div class="car-toggle">
+        <button id="btn-car" class="selected" onclick="selectCar(true)">🚗<span>Yes</span></button>
+        <button id="btn-walk" onclick="selectCar(false)">🚶<span>No</span></button>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn-confirm" onclick="addPerson()">Add me</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const map = L.map('map').setView([45.815, 15.965], 12);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© CartoDB'
+}).addTo(map);
+
+L.marker([45.7744, 15.8152], {
+  icon: L.divIcon({ html: '🏭', className: '', iconSize: [28,28], iconAnchor: [14,14] })
+}).addTo(map).bindPopup('<b>Bugatti-Rimac HQ</b>');
+
+const BIN_ID = '69fb9fc2c0954111d8e823cc';
+const MASTER_KEY = '$2a$10$lvCck3FWmRxS96xWGoaXi.SFvvQyXEDcb2zVO80l9Z2OLuhJ4iSEG';
+const ACCESS_KEY = '$2a$10$I8gpmIDiE5H/XHEJUX3XTu/VLjr.GGVkqGXQATCuJhn17Dap8wgwy';
+const BIN_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
+
+let people = [];
+let hasCar = true;
+
+function icon(car) {
+  return L.divIcon({ html: car ? '🚗' : '🚶', className: '', iconSize: [28,28], iconAnchor: [14,14] });
+}
+
+function placeMarker(p) {
+  L.marker([p.lat, p.lng], { icon: icon(p.car) }).addTo(map).bindPopup(`
+    <div class="popup-name">${p.name}</div>
+    <div class="popup-addr">${p.address}</div>
+    <div class="popup-tag ${p.car ? 'car' : 'walk'}">${p.car ? '🚗 Has a car' : '🚶 No car'}</div>
+  `);
+}
+
+async function loadPeople() {
+  try {
+    const r = await fetch(BIN_URL + '/latest', {
+      headers: { 'X-Master-Key': MASTER_KEY, 'X-Access-Key': ACCESS_KEY }
+    });
+    const data = await r.json();
+    people = data.record.people || [];
+    people.forEach(placeMarker);
+  } catch(e) {
+    alert('Error loading data. Please try again.');
+  }
+}
+
+async function savePeople() {
+  await fetch(BIN_URL, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Master-Key': MASTER_KEY,
+      'X-Access-Key': ACCESS_KEY
+    },
+    body: JSON.stringify({ people })
+  });
+}
+
+loadPeople();
+
+function openModal() { document.getElementById('overlay').classList.add('open'); }
+function closeModal() { document.getElementById('overlay').classList.remove('open'); }
+function selectCar(val) {
+  hasCar = val;
+  document.getElementById('btn-car').classList.toggle('selected', val);
+  document.getElementById('btn-walk').classList.toggle('selected', !val);
+}
+document.getElementById('overlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('overlay')) closeModal();
+});
+
+async function addPerson() {
+  const name = (document.getElementById('f-name').value.trim() + ' ' + document.getElementById('f-surname').value.trim()).trim();
+  const address = document.getElementById('f-address').value.trim();
+  if (!name || !address) { alert('Please fill in all fields.'); return; }
+
+  document.querySelector('.btn-confirm').textContent = 'Saving...';
+
+  let lat, lng;
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address + ', Zagreb, Croatia')}&format=json&limit=1`);
+    const d = await r.json();
+    if (d.length) { lat = +d[0].lat; lng = +d[0].lon; }
+    else { lat = 45.81 + (Math.random()-.5)*.05; lng = 15.97 + (Math.random()-.5)*.08; }
+  } catch {
+    lat = 45.81 + (Math.random()-.5)*.05; lng = 15.97 + (Math.random()-.5)*.08;
+  }
+
+  const person = { name, address, car: hasCar, lat, lng };
+  people.push(person);
+  await savePeople();
+  placeMarker(person);
+  map.flyTo([lat, lng], 14);
+  closeModal();
+  document.querySelector('.btn-confirm').textContent = 'Add me';
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-surname').value = '';
+  document.getElementById('f-address').value = '';
+  selectCar(true);
+}
+</script>
+</body>
+</html>
